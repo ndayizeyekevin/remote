@@ -33,7 +33,7 @@ $statusCode = defined('ERROR_PAGE_CODE') ? ERROR_PAGE_CODE : 500;
 $page = $errorPages[$statusCode] ?? $errorPages[500];
 http_response_code($statusCode);
 $basePath = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/')), '/');
-$basePath = $basePath === '' ? '' : $basePath;
+$basePath = preg_replace('~/admin$~i', '', $basePath) ?? $basePath;
 ?>
 <!DOCTYPE html>
 <html lang="en">
