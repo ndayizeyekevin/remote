@@ -2,7 +2,13 @@
 require_once __DIR__ . '/includes/require_admin.php';
 
 $search = isset($_GET['q']) && is_string($_GET['q']) ? trim($_GET['q']) : '';
-$pageSize = 25;
+$allowedPageSizes = [10, 25, 50, 100];
+$requestedPageSize = isset($_GET['per_page']) && is_string($_GET['per_page'])
+    ? filter_var($_GET['per_page'], FILTER_VALIDATE_INT)
+    : 25;
+$pageSize = is_int($requestedPageSize) && in_array($requestedPageSize, $allowedPageSizes, true)
+    ? $requestedPageSize
+    : 25;
 $page = isset($_GET['page']) && is_string($_GET['page'])
     ? filter_var($_GET['page'], FILTER_VALIDATE_INT)
     : 1;
@@ -56,8 +62,39 @@ try {
 }
 $firstItem = $totalItems > 0 ? $offset + 1 : 0;
 $lastItem = $offset + count($menuItems);
-$previousPageUrl = '?' . http_build_query(['q' => $search, 'page' => max(1, $page - 1)]);
-$nextPageUrl = '?' . http_build_query(['q' => $search, 'page' => min($totalPages, $page + 1)]);
+$previousPageUrl = '?' . http_build_query([
+    'q' => $search,
+    'page' => max(1, $page - 1),
+    'per_page' => $pageSize,
+]);
+$nextPageUrl = '?' . http_build_query([
+    'q' => $search,
+    'page' => min($totalPages, $page + 1),
+    'per_page' => $pageSize,
+]);
+
+if ($totalPages <= 7) {
+    $visiblePages = range(1, $totalPages);
+} else {
+    $visiblePages = [1];
+    $windowStart = max(2, $page - 1);
+    $windowEnd = min($totalPages - 1, $page + 1);
+    if ($page <= 3) {
+        $windowEnd = min($totalPages - 1, 4);
+    } elseif ($page >= $totalPages - 2) {
+        $windowStart = max(2, $totalPages - 3);
+    }
+    if ($windowStart > 2) {
+        $visiblePages[] = '...';
+    }
+    for ($number = $windowStart; $number <= $windowEnd; $number++) {
+        $visiblePages[] = $number;
+    }
+    if ($windowEnd < $totalPages - 1) {
+        $visiblePages[] = '...';
+    }
+    $visiblePages[] = $totalPages;
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -67,7 +104,7 @@ $nextPageUrl = '?' . http_build_query(['q' => $search, 'page' => min($totalPages
     <title>Menu management | KABC Hotel</title>
     <link rel="icon" type="image/png" href="../assets/images/icon.png">
     <script src="../assets/js/admin_theme.js?v=2"></script>
-    <link rel="stylesheet" href="../assets/css/admin.css?v=12">
+    <link rel="stylesheet" href="../assets/css/admin.css?v=13">
 </head>
 <body>
 <div class="admin-layout">
@@ -87,11 +124,19 @@ $nextPageUrl = '?' . http_build_query(['q' => $search, 'page' => min($totalPages
             <div class="notice <?= $flash['type'] === 'success' ? 'success' : 'error' ?>" role="status"><?= adminEscape($flash['message']) ?></div>
         <?php endif; ?>
 
-        <form class="search-form" id="menuSearchForm" method="get">
+        <form class="search-form menu-search-form" id="menuSearchForm" method="get">
             <label class="visually-hidden" for="menuSearch">Search menu</label>
             <input id="menuSearch" name="q" type="search" value="<?= adminEscape($search) ?>" placeholder="Search by item or description">
             <button class="button primary" type="submit">Search</button>
             <a class="button" id="clearMenuSearch" href="menu"<?= $search === '' ? ' hidden' : '' ?>>Clear</a>
+            <label class="menu-page-size" for="menuPageSize">
+                <span>Rows per page</span>
+                <select id="menuPageSize" name="per_page">
+                    <?php foreach ($allowedPageSizes as $allowedPageSize): ?>
+                        <option value="<?= $allowedPageSize ?>"<?= $pageSize === $allowedPageSize ? ' selected' : '' ?>><?= $allowedPageSize ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
         </form>
 
         <p class="muted" id="menuSearchStatus" aria-live="polite">
@@ -116,16 +161,32 @@ $nextPageUrl = '?' . http_build_query(['q' => $search, 'page' => min($totalPages
             </table>
         </section>
         <nav class="menu-pagination" id="menuPagination" aria-label="Menu results pages"<?= $totalPages <= 1 ? ' hidden' : '' ?>>
-            <a class="button" id="menuPreviousPage" data-page="<?= max(1, $page - 1) ?>"
-                href="<?= adminEscape($previousPageUrl) ?>" rel="prev"
-                aria-disabled="<?= $page <= 1 ? 'true' : 'false' ?>"<?= $page <= 1 ? ' tabindex="-1"' : '' ?>>Previous</a>
-            <span class="muted" id="menuPageStatus" aria-live="polite">Page <?= $page ?> of <?= $totalPages ?></span>
-            <a class="button" id="menuNextPage" data-page="<?= min($totalPages, $page + 1) ?>"
-                href="<?= adminEscape($nextPageUrl) ?>" rel="next"
-                aria-disabled="<?= $page >= $totalPages ? 'true' : 'false' ?>"<?= $page >= $totalPages ? ' tabindex="-1"' : '' ?>>Next</a>
+            <div class="menu-pagination-info">
+                <span class="pagination-current" id="menuPageStatus" aria-live="polite">Page <?= $page ?> of <?= $totalPages ?></span>
+            </div>
+            <div class="menu-pagination-controls">
+                <a class="button pagination-arrow" id="menuPreviousPage" data-page="<?= max(1, $page - 1) ?>"
+                    href="<?= adminEscape($previousPageUrl) ?>" rel="prev"
+                    aria-disabled="<?= $page <= 1 ? 'true' : 'false' ?>"<?= $page <= 1 ? ' tabindex="-1"' : '' ?>>Previous</a>
+                <div class="menu-page-numbers" id="menuPageNumbers" aria-label="Select menu page">
+                    <?php foreach ($visiblePages as $visiblePage): ?>
+                        <?php if ($visiblePage === '...'): ?>
+                            <span class="pagination-ellipsis" aria-hidden="true">...</span>
+                        <?php else: ?>
+                            <?php $pageUrl = '?' . http_build_query(['q' => $search, 'page' => $visiblePage, 'per_page' => $pageSize]); ?>
+                            <a class="pagination-page<?= $visiblePage === $page ? ' is-current' : '' ?>"
+                                href="<?= adminEscape($pageUrl) ?>" data-page="<?= $visiblePage ?>"
+                                aria-label="Page <?= $visiblePage ?>"<?= $visiblePage === $page ? ' aria-current="page"' : '' ?>><?= $visiblePage ?></a>
+                        <?php endif; ?>
+                    <?php endforeach; ?>
+                </div>
+                <a class="button pagination-arrow" id="menuNextPage" data-page="<?= min($totalPages, $page + 1) ?>"
+                    href="<?= adminEscape($nextPageUrl) ?>" rel="next"
+                    aria-disabled="<?= $page >= $totalPages ? 'true' : 'false' ?>"<?= $page >= $totalPages ? ' tabindex="-1"' : '' ?>>Next</a>
+            </div>
         </nav>
     </main>
 </div>
-<script src="../assets/js/admin_menu_search.js?v=2"></script>
+<script src="../assets/js/admin_menu_search.js?v=3"></script>
 </body>
 </html>

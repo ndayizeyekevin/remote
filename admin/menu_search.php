@@ -5,7 +5,13 @@ header('Content-Type: application/json; charset=UTF-8');
 header('Cache-Control: no-store, private');
 
 $search = isset($_GET['q']) && is_string($_GET['q']) ? trim($_GET['q']) : '';
-$limit = 25;
+$allowedPageSizes = [10, 25, 50, 100];
+$requestedPageSize = isset($_GET['per_page']) && is_string($_GET['per_page'])
+    ? filter_var($_GET['per_page'], FILTER_VALIDATE_INT)
+    : 25;
+$limit = is_int($requestedPageSize) && in_array($requestedPageSize, $allowedPageSizes, true)
+    ? $requestedPageSize
+    : 25;
 $page = isset($_GET['page']) && is_string($_GET['page'])
     ? filter_var($_GET['page'], FILTER_VALIDATE_INT)
     : 1;
@@ -64,6 +70,7 @@ echo json_encode([
     'items' => $items,
     'total' => $total,
     'limit' => $limit,
+    'page_size' => $limit,
     'page' => $page,
     'pages' => $pages,
 ], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
