@@ -1,0 +1,31 @@
+name: Auto Deploy to test.nusk.rw
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Upload PHP files via FTP
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout latest code
+        uses: actions/checkout@v4
+
+      - name: Sync files to InfinityFree
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ftpupload.net
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          server-dir: /test.nusk.rw/htdocs/
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/README.md
+            **/config.php
+            **/.env
+            **/.env.*
+            **/config/database.php
