@@ -22,22 +22,31 @@ try {
                 : '';
             $remoteAddress = substr((string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown'), 0, 45);
 
-            $db->exec(
-                'DELETE FROM admin_password_reset_requests
-                 WHERE created_at < DATE_SUB(NOW(), INTERVAL 1 DAY)'
-            );
-            $recordRequest = $db->prepare(
-                'INSERT INTO admin_password_reset_requests (ip_address) VALUES (:ip_address)'
-            );
-            $recordRequest->execute([':ip_address' => $remoteAddress]);
-            $recentRequests = $db->prepare(
-                'SELECT COUNT(*) FROM admin_password_reset_requests
-                 WHERE ip_address = :ip_address
-                   AND created_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)'
-            );
-            $recentRequests->execute([':ip_address' => $remoteAddress]);
+            $db->beginTransaction();
+            try {
+                $db->exec(
+                    'DELETE FROM admin_password_reset_requests
+                     WHERE created_at < DATE_SUB(NOW(), INTERVAL 1 DAY)'
+                );
+                $recordRequest = $db->prepare(
+                    'INSERT INTO admin_password_reset_requests (ip_address) VALUES (:ip_address)'
+                );
+                $recordRequest->execute([':ip_address' => $remoteAddress]);
+                $recentRequests = $db->prepare(
+                    'SELECT COUNT(*) FROM admin_password_reset_requests
+                     WHERE ip_address = :ip_address
+                       AND created_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)'
+                );
+                $recentRequests->execute([':ip_address' => $remoteAddress]);
+                $recentRequestCount = (int) $recentRequests->fetchColumn();
+                $db->commit();
+            } finally {
+                if ($db->inTransaction()) {
+                    $db->rollBack();
+                }
+            }
 
-            if ((int) $recentRequests->fetchColumn() > 5) {
+            if ($recentRequestCount > 5) {
                 $errorMessage = 'Too many reset requests. Please wait 15 minutes and try again.';
             } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 190) {
                 $errorMessage = 'Enter a valid account email address.';

@@ -24,37 +24,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             : '';
 
         try {
-            $stmt = $db->prepare('SELECT password_hash FROM admin_users WHERE id = :id');
-            $stmt->execute([':id' => $_SESSION['admin_user_id']]);
-            $admin = $stmt->fetch();
+            $newPassword = isset($_POST['new_password']) && is_string($_POST['new_password'])
+                ? $_POST['new_password']
+                : '';
+            $confirmPassword = isset($_POST['confirm_password']) && is_string($_POST['confirm_password'])
+                ? $_POST['confirm_password']
+                : '';
 
-            if (!$admin || !password_verify($currentPassword, $admin['password_hash'])) {
-                $errorMessage = 'Your current password is incorrect.';
+            if (strlen($newPassword) < 12) {
+                $errorMessage = 'The new password must contain at least 12 characters.';
+            } elseif ($newPassword !== $confirmPassword) {
+                $errorMessage = 'The new password and confirmation do not match.';
             } else {
-                $newPassword = isset($_POST['new_password']) && is_string($_POST['new_password'])
-                    ? $_POST['new_password']
-                    : '';
-                $confirmPassword = isset($_POST['confirm_password']) && is_string($_POST['confirm_password'])
-                    ? $_POST['confirm_password']
-                    : '';
-                if (strlen($newPassword) < 12) {
-                    $errorMessage = 'The new password must contain at least 12 characters.';
-                } elseif ($newPassword !== $confirmPassword) {
-                    $errorMessage = 'The new password and confirmation do not match.';
-                } else {
-                    $update = $db->prepare(
-                        'UPDATE admin_users
-                         SET password_hash = :password_hash,
-                             password_reset_key = NULL,
-                             reset_key_expiry = NULL
-                         WHERE id = :id'
+                $db->beginTransaction();
+                try {
+                    $stmt = $db->prepare(
+                        'SELECT password_hash FROM admin_users WHERE id = :id FOR UPDATE'
                     );
-                    $update->execute([
-                        ':password_hash' => password_hash($newPassword, PASSWORD_DEFAULT),
-                        ':id' => $_SESSION['admin_user_id'],
-                    ]);
-                    session_regenerate_id(true);
-                    $successMessage = 'Password updated successfully.';
+                    $stmt->execute([':id' => $_SESSION['admin_user_id']]);
+                    $admin = $stmt->fetch();
+
+                    if (!$admin || !password_verify($currentPassword, $admin['password_hash'])) {
+                        $errorMessage = 'Your current password is incorrect.';
+                    } else {
+                        $update = $db->prepare(
+                            'UPDATE admin_users
+                             SET password_hash = :password_hash,
+                                 password_reset_key = NULL,
+                                 reset_key_expiry = NULL
+                             WHERE id = :id'
+                        );
+                        $update->execute([
+                            ':password_hash' => password_hash($newPassword, PASSWORD_DEFAULT),
+                            ':id' => $_SESSION['admin_user_id'],
+                        ]);
+                        $db->commit();
+                        session_regenerate_id(true);
+                        $successMessage = 'Password updated successfully.';
+                    }
+                } finally {
+                    if ($db->inTransaction()) {
+                        $db->rollBack();
+                    }
                 }
             }
         } catch (PDOException $e) {
