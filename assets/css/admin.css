@@ -353,6 +353,18 @@ a { color: var(--admin-green); }
     margin-bottom: 20px;
 }
 
+.menu-pagination {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.menu-pagination[hidden] { display: none; }
+.menu-pagination a[aria-disabled="true"] { opacity: 0.55; pointer-events: none; }
+
 .login-page {
     display: grid;
     min-height: 100vh;

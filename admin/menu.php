@@ -2,30 +2,62 @@
 require_once __DIR__ . '/includes/require_admin.php';
 
 $search = isset($_GET['q']) && is_string($_GET['q']) ? trim($_GET['q']) : '';
+$pageSize = 25;
+$page = isset($_GET['page']) && is_string($_GET['page'])
+    ? filter_var($_GET['page'], FILTER_VALIDATE_INT)
+    : 1;
+if (!is_int($page) || $page < 1) {
+    $page = 1;
+}
+$totalItems = 0;
+$totalPages = 1;
+$offset = 0;
 $flash = adminConsumeFlash();
 
 try {
     if ($search === '') {
-        $stmt = $db->query(
-            'SELECT menu_id, menu_name, menu_desc, menu_price, image_path
-             FROM menu ORDER BY menu_name ASC LIMIT 200'
-        );
+        $countStmt = $db->query('SELECT COUNT(*) FROM menu');
     } else {
-        $stmt = $db->prepare(
-            'SELECT menu_id, menu_name, menu_desc, menu_price, image_path
-             FROM menu WHERE menu_name LIKE :search_name OR menu_desc LIKE :search_desc
-             ORDER BY menu_name ASC LIMIT 200'
-        );
         $searchTerm = '%' . $search . '%';
-        $stmt->execute([':search_name' => $searchTerm, ':search_desc' => $searchTerm]);
+        $countStmt = $db->prepare(
+            'SELECT COUNT(*) FROM menu
+             WHERE menu_name LIKE :search_name OR menu_desc LIKE :search_desc'
+        );
+        $countStmt->execute([':search_name' => $searchTerm, ':search_desc' => $searchTerm]);
     }
+    $totalItems = (int) $countStmt->fetchColumn();
+    $totalPages = max(1, (int) ceil($totalItems / $pageSize));
+    $page = min($page, $totalPages);
+    $offset = ($page - 1) * $pageSize;
+
+    $query = 'SELECT menu_id, menu_name, menu_desc, menu_price, image_path FROM menu';
+    if ($search !== '') {
+        $query .= ' WHERE menu_name LIKE :search_name OR menu_desc LIKE :search_desc';
+    }
+    $query .= ' ORDER BY menu_name ASC, menu_id ASC LIMIT :page_size OFFSET :offset';
+    $stmt = $db->prepare($query);
+    if ($search !== '') {
+        $stmt->bindValue(':search_name', $searchTerm, PDO::PARAM_STR);
+        $stmt->bindValue(':search_desc', $searchTerm, PDO::PARAM_STR);
+    }
+    $stmt->bindValue(':page_size', $pageSize, PDO::PARAM_INT);
+    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+    $stmt->execute();
     $menuItems = $stmt->fetchAll();
 } catch (PDOException $e) {
     error_log('Unable to load menu items for admin: ' . $e->getMessage());
     http_response_code(500);
     $menuItems = [];
+    $totalItems = 0;
+    $totalPages = 1;
+    $page = 1;
+    $offset = 0;
     $flash = ['message' => 'Menu items could not be loaded.', 'type' => 'error'];
 }
+$firstItem = $totalItems > 0 ? $offset + 1 : 0;
+$lastItem = $offset + count($menuItems);
+$previousPageUrl = '?' . http_build_query(['q' => $search, 'page' => max(1, $page - 1)]);
+$nextPageUrl = '?' . http_build_query(['q' => $search, 'page' => min($totalPages, $page + 1)]);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -35,7 +67,7 @@ try {
     <title>Menu management | KABC Hotel</title>
     <link rel="icon" type="image/png" href="../assets/images/icon.png">
     <script src="../assets/js/admin_theme.js?v=2"></script>
-    <link rel="stylesheet" href="../assets/css/admin.css?v=11">
+    <link rel="stylesheet" href="../assets/css/admin.css?v=12">
 </head>
 <body>
 <div class="admin-layout">
@@ -62,10 +94,11 @@ try {
             <a class="button" id="clearMenuSearch" href="menu"<?= $search === '' ? ' hidden' : '' ?>>Clear</a>
         </form>
 
+        <p class="muted" id="menuSearchStatus" aria-live="polite">
+            <?= $totalItems === 0 ? '0 items found.' : 'Showing ' . $firstItem . '-' . $lastItem . ' of ' . $totalItems . ' items.' ?>
+        </p>
+
         <section class="admin-card table-wrap">
-            <p class="muted" id="menuSearchStatus" aria-live="polite">
-                <?= count($menuItems) === 200 ? 'Showing up to 200 results. Narrow your search for other items.' : count($menuItems) . ' items found.' ?>
-            </p>
             <table class="admin-table">
                 <thead><tr><th>Item</th><th>Description</th><th>Price</th><th>Image</th><th></th></tr></thead>
                 <tbody id="menuResults">
@@ -82,8 +115,17 @@ try {
                 </tbody>
             </table>
         </section>
+        <nav class="menu-pagination" id="menuPagination" aria-label="Menu results pages"<?= $totalPages <= 1 ? ' hidden' : '' ?>>
+            <a class="button" id="menuPreviousPage" data-page="<?= max(1, $page - 1) ?>"
+                href="<?= adminEscape($previousPageUrl) ?>" rel="prev"
+                aria-disabled="<?= $page <= 1 ? 'true' : 'false' ?>"<?= $page <= 1 ? ' tabindex="-1"' : '' ?>>Previous</a>
+            <span class="muted" id="menuPageStatus" aria-live="polite">Page <?= $page ?> of <?= $totalPages ?></span>
+            <a class="button" id="menuNextPage" data-page="<?= min($totalPages, $page + 1) ?>"
+                href="<?= adminEscape($nextPageUrl) ?>" rel="next"
+                aria-disabled="<?= $page >= $totalPages ? 'true' : 'false' ?>"<?= $page >= $totalPages ? ' tabindex="-1"' : '' ?>>Next</a>
+        </nav>
     </main>
 </div>
-<script src="../assets/js/admin_menu_search.js"></script>
+<script src="../assets/js/admin_menu_search.js?v=2"></script>
 </body>
 </html>

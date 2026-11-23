@@ -4,8 +4,13 @@
     var results = document.getElementById('menuResults');
     var status = document.getElementById('menuSearchStatus');
     var clearLink = document.getElementById('clearMenuSearch');
+    var pagination = document.getElementById('menuPagination');
+    var previousPage = document.getElementById('menuPreviousPage');
+    var nextPage = document.getElementById('menuNextPage');
+    var pageStatus = document.getElementById('menuPageStatus');
 
-    if (!form || !input || !results || !status || !clearLink) {
+    if (!form || !input || !results || !status || !clearLink
+        || !pagination || !previousPage || !nextPage || !pageStatus) {
         return;
     }
 
@@ -51,8 +56,38 @@
         results.replaceChildren(fragment);
     }
 
-    async function searchMenu() {
+    function updatePageLink(link, query, page, disabled) {
+        var url = new URL(window.location.href);
+        if (query) {
+            url.searchParams.set('q', query);
+        } else {
+            url.searchParams.delete('q');
+        }
+        if (page > 1) {
+            url.searchParams.set('page', String(page));
+        } else {
+            url.searchParams.delete('page');
+        }
+        link.href = url.pathname + url.search + url.hash;
+        link.dataset.page = String(page);
+        link.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+        if (disabled) {
+            link.setAttribute('tabindex', '-1');
+        } else {
+            link.removeAttribute('tabindex');
+        }
+    }
+
+    function renderPagination(page, pages, query) {
+        pagination.hidden = pages <= 1;
+        pageStatus.textContent = 'Page ' + page + ' of ' + pages;
+        updatePageLink(previousPage, query, Math.max(1, page - 1), page <= 1);
+        updatePageLink(nextPage, query, Math.min(pages, page + 1), page >= pages);
+    }
+
+    async function searchMenu(requestedPage) {
         var query = input.value.trim();
+        var page = requestedPage || 1;
         clearLink.hidden = query === '';
         if (controller) {
             controller.abort();
@@ -66,10 +101,18 @@
         } else {
             url.searchParams.delete('q');
         }
+        if (page > 1) {
+            url.searchParams.set('page', String(page));
+        } else {
+            url.searchParams.delete('page');
+        }
         window.history.replaceState({}, '', url);
 
         try {
-            var response = await fetch('menu_search?q=' + encodeURIComponent(query), {
+            var searchUrl = new URL('menu_search', window.location.href);
+            searchUrl.searchParams.set('q', query);
+            searchUrl.searchParams.set('page', String(page));
+            var response = await fetch(searchUrl, {
                 headers: { Accept: 'application/json' },
                 credentials: 'same-origin',
                 signal: controller.signal
@@ -79,14 +122,19 @@
             }
 
             var data = await response.json();
-            if (!Array.isArray(data.items) || typeof data.total !== 'number') {
+            if (!Array.isArray(data.items) || typeof data.total !== 'number'
+                || typeof data.page !== 'number' || typeof data.pages !== 'number'
+                || typeof data.limit !== 'number') {
                 throw new Error('The search response was invalid.');
             }
 
             renderItems(data.items);
-            status.textContent = data.total > data.items.length
-                ? 'Showing ' + data.items.length + ' of ' + data.total + ' items. Refine your search to see fewer results.'
-                : data.total + (data.total === 1 ? ' item found.' : ' items found.');
+            var firstItem = data.total === 0 ? 0 : ((data.page - 1) * data.limit) + 1;
+            var lastItem = Math.min(data.page * data.limit, data.total);
+            status.textContent = data.total === 0
+                ? '0 items found.'
+                : 'Showing ' + firstItem + '-' + lastItem + ' of ' + data.total + ' items.';
+            renderPagination(data.page, data.pages, query);
         } catch (error) {
             if (error.name === 'AbortError') {
                 return;
@@ -98,20 +146,33 @@
 
     input.addEventListener('input', function () {
         window.clearTimeout(timer);
-        timer = window.setTimeout(searchMenu, 250);
+        timer = window.setTimeout(function () { searchMenu(1); }, 250);
     });
 
     form.addEventListener('submit', function (event) {
         event.preventDefault();
         window.clearTimeout(timer);
-        searchMenu();
+        searchMenu(1);
+    });
+
+    pagination.addEventListener('click', function (event) {
+        var link = event.target.closest('a[data-page]');
+        if (!link) {
+            return;
+        }
+        event.preventDefault();
+        if (link.getAttribute('aria-disabled') === 'true') {
+            return;
+        }
+        window.clearTimeout(timer);
+        searchMenu(Number(link.dataset.page));
     });
 
     clearLink.addEventListener('click', function (event) {
         event.preventDefault();
         input.value = '';
         window.clearTimeout(timer);
-        searchMenu();
+        searchMenu(1);
         input.focus();
     });
 })();
