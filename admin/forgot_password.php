@@ -145,7 +145,7 @@ try {
         <form method="post" class="admin-form">
             <input type="hidden" name="csrf_token" value="<?= adminEscape(adminCsrfToken()) ?>">
             <label for="email">Account email</label>
-            <input id="email" name="email" type="email" maxlength="190" autocomplete="email" required value="<?= adminEscape($email) ?>">
+            <input id="email" name="email" type="email" placeholder="you@example.com" maxlength="190" autocomplete="email" required value="<?= adminEscape($email) ?>">
             <button class="button primary full-width" type="submit">Email reset link</button>
         </form>
         <a class="login-public-link" href="index">Return to sign in</a>
