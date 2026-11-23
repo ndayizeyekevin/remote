@@ -1,4 +1,8 @@
+/vendor/
+/config/smtp.php
+*.zip
 /.env
 /.env.*
 /config/database.php
 /config.php
+.htaccess
