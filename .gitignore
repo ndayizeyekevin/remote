@@ -1,1 +1,4 @@
-config.php
+/.env
+/.env.*
+/config/database.php
+/config.php
