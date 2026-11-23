@@ -1,0 +1,225 @@
+<?php
+require_once __DIR__ . '/includes/bootstrap.php';
+require_once __DIR__ . '/includes/auth_schema.php';
+
+$errorMessage = '';
+$setupMode = false;
+$landingLoginAttempt = $_SERVER['REQUEST_METHOD'] === 'POST'
+    && isset($_POST['login_source'])
+    && is_string($_POST['login_source'])
+    && $_POST['login_source'] === 'landing';
+
+try {
+    $setupMode = initializeAdminAuthSchema($db);
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (!adminVerifyCsrfToken($_POST['csrf_token'] ?? null)) {
+            $errorMessage = 'Your session has expired. Please try again.';
+        } else {
+            $username = isset($_POST['username']) && is_string($_POST['username'])
+                ? trim($_POST['username'])
+                : '';
+            $password = isset($_POST['password']) && is_string($_POST['password'])
+                ? $_POST['password']
+                : '';
+            $email = isset($_POST['email']) && is_string($_POST['email'])
+                ? trim($_POST['email'])
+                : '';
+            $firstName = isset($_POST['firstName']) && is_string($_POST['firstName'])
+                ? trim($_POST['firstName'])
+                : '';
+            $lastName = isset($_POST['lastName']) && is_string($_POST['lastName'])
+                ? trim($_POST['lastName'])
+                : '';
+            $remoteAddress = substr((string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown'), 0, 45);
+            $userAgent = substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255);
+
+            if (!preg_match('/^[a-zA-Z0-9_.-]{3,64}$/', $username)) {
+                $errorMessage = 'Use a username of 3–64 letters, numbers, dots, underscores, or hyphens.';
+            } elseif ($setupMode && strlen($password) < 12) {
+                $errorMessage = 'Choose a password with at least 12 characters.';
+            } elseif (!$setupMode && $password === '') {
+                $errorMessage = 'Enter your password.';
+            } elseif ($setupMode && (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 190)) {
+                $errorMessage = 'Enter a valid email address (maximum 190 characters).';
+            } elseif ($setupMode && ($firstName === '' || strlen($firstName) > 100 || $lastName === '' || strlen($lastName) > 100)) {
+                $errorMessage = 'Enter your first and last name (maximum 100 characters each).';
+            } else {
+                if ($setupMode) {
+                    $lockAcquired = (int) $db->query("SELECT GET_LOCK('kabc_menu_admin_setup', 5)")->fetchColumn() === 1;
+                    if (!$lockAcquired) {
+                        $errorMessage = 'Initial admin setup is busy. Please try again.';
+                    } else {
+                        try {
+                            $setupMode = (int) $db->query('SELECT COUNT(*) FROM admin_users')->fetchColumn() === 0;
+                            if (!$setupMode) {
+                                $errorMessage = 'An admin account has already been created. Please sign in.';
+                            } else {
+                                $db->beginTransaction();
+                                $createUser = $db->prepare(
+                                    'INSERT INTO admin_users (username, firstName, lastName, password_hash, email)
+                                     VALUES (:username, :first_name, :last_name, :password_hash, :email)'
+                                );
+                                $createUser->execute([
+                                    ':username' => $username,
+                                    ':first_name' => $firstName,
+                                    ':last_name' => $lastName,
+                                    ':password_hash' => password_hash($password, PASSWORD_DEFAULT),
+                                    ':email' => $email,
+                                ]);
+                                $userId = (int) $db->lastInsertId();
+                                $logSetup = $db->prepare(
+                                    'INSERT INTO admin_login_logs (user_id, username, success, ip_address, user_agent)
+                                     VALUES (:user_id, :username, 1, :ip_address, :user_agent)'
+                                );
+                                $logSetup->execute([
+                                    ':user_id' => $userId,
+                                    ':username' => $username,
+                                    ':ip_address' => substr((string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown'), 0, 45),
+                                    ':user_agent' => substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255),
+                                ]);
+                                $db->commit();
+                                $setupMode = false;
+                            }
+                        } catch (PDOException $e) {
+                            if ($db->inTransaction()) {
+                                $db->rollBack();
+                            }
+                            error_log('Initial admin account setup failed: ' . $e->getMessage());
+                            $errorMessage = 'The admin account could not be created. Please try again.';
+                        } finally {
+                            $db->query("SELECT RELEASE_LOCK('kabc_menu_admin_setup')");
+                        }
+                    }
+                } else {
+                    $failedAttempts = $db->prepare(
+                        'SELECT COUNT(*) FROM admin_login_logs
+                         WHERE ip_address = :ip_address AND success = 0
+                           AND created_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)'
+                    );
+                    $failedAttempts->execute([':ip_address' => $remoteAddress]);
+
+                    if ((int) $failedAttempts->fetchColumn() >= 10) {
+                        $errorMessage = 'Too many sign-in attempts. Please wait 15 minutes and try again.';
+                    } else {
+                        $findUser = $db->prepare('SELECT id, username, password_hash FROM admin_users WHERE username = :username');
+                        $findUser->execute([':username' => $username]);
+                        $user = $findUser->fetch();
+                        $authenticated = $user && password_verify($password, $user['password_hash']);
+
+                        $logAttempt = $db->prepare(
+                            'INSERT INTO admin_login_logs (user_id, username, success, ip_address, user_agent)
+                             VALUES (:user_id, :username, :success, :ip_address, :user_agent)'
+                        );
+                        $logAttempt->execute([
+                            ':user_id' => $authenticated ? $user['id'] : null,
+                            ':username' => $username,
+                            ':success' => $authenticated ? 1 : 0,
+                            ':ip_address' => $remoteAddress,
+                            ':user_agent' => $userAgent,
+                        ]);
+
+                        if ($authenticated) {
+                            session_regenerate_id(true);
+                            $_SESSION['admin_user_id'] = (int) $user['id'];
+                            $_SESSION['admin_username'] = $user['username'];
+                            $db->prepare('UPDATE admin_users SET last_login_at = NOW() WHERE id = :id')
+                                ->execute([':id' => $user['id']]);
+                            header('Location: dashboard');
+                            exit;
+                        }
+
+                        $errorMessage = 'The username or password is incorrect.';
+                    }
+                }
+
+                if ($setupMode === false && isset($userId) && $errorMessage === '') {
+                    session_regenerate_id(true);
+                    $_SESSION['admin_user_id'] = $userId;
+                    $_SESSION['admin_username'] = $username;
+                    header('Location: dashboard');
+                    exit;
+                }
+            }
+        }
+    }
+} catch (PDOException $e) {
+    error_log('Admin login initialization failed: ' . $e->getMessage());
+    http_response_code(500);
+    $errorMessage = 'Admin sign-in is temporarily unavailable. Please try again later.';
+}
+
+if ($landingLoginAttempt && !$setupMode && $errorMessage !== '') {
+    $_SESSION['landing_login_error'] = $errorMessage;
+    header('Location: ../#home');
+    exit;
+}
+
+if (!empty($_SESSION['admin_user_id'])) {
+    header('Location: dashboard');
+    exit;
+}
+$passwordResetNotice = $_SESSION['admin_password_reset_notice'] ?? '';
+unset($_SESSION['admin_password_reset_notice']);
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?= $setupMode ? 'Set up admin' : 'Admin sign in' ?> | KABC Hotel</title>
+    <script src="../assets/js/admin_theme.js?v=2"></script>
+    <link rel="stylesheet" href="../assets/css/admin.css?v=11">
+    <link rel="icon" type="image/png" href="../assets/images/icon.png">
+</head>
+<body class="login-page">
+    <button class="theme-toggle login-theme-toggle" type="button" data-theme-toggle aria-label="Toggle color theme" aria-pressed="false">
+        <i class="fa-solid fa-sun theme-toggle-icon" aria-hidden="true"></i>
+        <span class="theme-toggle-label">Dark theme</span>
+    </button>
+    <main class="login-card">
+        <a class="login-brand" href="../full_menu" aria-label="KABC Hotel public menu">
+            <img src="../assets/images/icon.png" alt="KABC Hotel">
+        </a>
+        <p class="eyebrow">KABC HOTEL ADMIN</p>
+        <h1><?= $setupMode ? 'Create your admin account' : 'Welcome back' ?></h1>
+        <p class="muted">
+            <?= $setupMode
+                ? 'This one-time setup creates the first administrator. Choose a strong password and keep it private.'
+                : 'Sign in to manage menu items, images, and your admin account.' ?>
+        </p>
+
+        <?php if ($errorMessage !== ''): ?>
+            <div class="notice error" role="alert"><?= adminEscape($errorMessage) ?></div>
+        <?php endif; ?>
+        <?php if ($passwordResetNotice !== ''): ?>
+            <div class="notice success" role="status"><?= adminEscape($passwordResetNotice) ?></div>
+        <?php endif; ?>
+        <form method="post" class="admin-form">
+            <input type="hidden" name="csrf_token" value="<?= adminEscape(adminCsrfToken()) ?>">
+            <label for="username">Username</label>
+            <input id="username" name="username" type="text" minlength="3" placeholder="Enter username" maxlength="64" autocomplete="username" required value="<?= adminEscape($_POST['username'] ?? '') ?>">
+
+            <?php if ($setupMode): ?>
+                <label for="firstName">First name</label>
+                <input id="firstName" name="firstName" type="text" maxlength="100" autocomplete="given-name" required value="<?= adminEscape($_POST['firstName'] ?? '') ?>">
+                <label for="lastName">Last name</label>
+                <input id="lastName" name="lastName" type="text" maxlength="100" autocomplete="family-name" required value="<?= adminEscape($_POST['lastName'] ?? '') ?>">
+                <label for="email">Email</label>
+                <input id="email" name="email" type="email" maxlength="190" placeholder="Enter account email" autocomplete="email" required value="<?= adminEscape($_POST['email'] ?? '') ?>">
+            <?php endif; ?>
+
+            <label for="password"><?= $setupMode ? 'Password (12+ characters)' : 'Password' ?></label>
+            <input id="password" name="password" type="password" placeholder="Enter password" minlength="<?= $setupMode ? '12' : '1' ?>" autocomplete="<?= $setupMode ? 'new-password' : 'current-password' ?>" required>
+
+            <button class="button primary full-width" type="submit"><?= $setupMode ? 'Create admin account' : 'Sign in' ?></button>
+        </form>
+        <?php if (!$setupMode): ?>
+            <a class="login-public-link" href="forgot_password">Forgot your password?</a>
+        <?php endif; ?>
+        <br>
+        <a class="login-public-link" href="../full_menu">View public menu</a>
+    </main>
+    <script src="../assets/js/password_visibility.js?v=1" defer></script>
+</body>
+</html>
