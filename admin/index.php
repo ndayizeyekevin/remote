@@ -102,29 +102,43 @@ try {
                     if ((int) $failedAttempts->fetchColumn() >= 10) {
                         $errorMessage = 'Too many sign-in attempts. Please wait 15 minutes and try again.';
                     } else {
-                        $findUser = $db->prepare('SELECT id, username, password_hash FROM admin_users WHERE username = :username');
-                        $findUser->execute([':username' => $username]);
-                        $user = $findUser->fetch();
-                        $authenticated = $user && password_verify($password, $user['password_hash']);
+                        $db->beginTransaction();
+                        try {
+                            $findUser = $db->prepare(
+                                'SELECT id, username, password_hash FROM admin_users
+                                 WHERE username = :username FOR UPDATE'
+                            );
+                            $findUser->execute([':username' => $username]);
+                            $user = $findUser->fetch();
+                            $authenticated = $user && password_verify($password, $user['password_hash']);
 
-                        $logAttempt = $db->prepare(
-                            'INSERT INTO admin_login_logs (user_id, username, success, ip_address, user_agent)
-                             VALUES (:user_id, :username, :success, :ip_address, :user_agent)'
-                        );
-                        $logAttempt->execute([
-                            ':user_id' => $authenticated ? $user['id'] : null,
-                            ':username' => $username,
-                            ':success' => $authenticated ? 1 : 0,
-                            ':ip_address' => $remoteAddress,
-                            ':user_agent' => $userAgent,
-                        ]);
+                            $logAttempt = $db->prepare(
+                                'INSERT INTO admin_login_logs (user_id, username, success, ip_address, user_agent)
+                                 VALUES (:user_id, :username, :success, :ip_address, :user_agent)'
+                            );
+                            $logAttempt->execute([
+                                ':user_id' => $authenticated ? $user['id'] : null,
+                                ':username' => $username,
+                                ':success' => $authenticated ? 1 : 0,
+                                ':ip_address' => $remoteAddress,
+                                ':user_agent' => $userAgent,
+                            ]);
+
+                            if ($authenticated) {
+                                $db->prepare('UPDATE admin_users SET last_login_at = NOW() WHERE id = :id')
+                                    ->execute([':id' => $user['id']]);
+                            }
+                            $db->commit();
+                        } finally {
+                            if ($db->inTransaction()) {
+                                $db->rollBack();
+                            }
+                        }
 
                         if ($authenticated) {
                             session_regenerate_id(true);
                             $_SESSION['admin_user_id'] = (int) $user['id'];
                             $_SESSION['admin_username'] = $user['username'];
-                            $db->prepare('UPDATE admin_users SET last_login_at = NOW() WHERE id = :id')
-                                ->execute([':id' => $user['id']]);
                             header('Location: dashboard');
                             exit;
                         }

@@ -29,3 +29,4 @@ jobs:
             **/.env
             **/.env.*
             **/config/database.php
+            **/internal.php
