@@ -121,6 +121,22 @@ try {
     <script src="../assets/js/admin_theme.js?v=2"></script>
     <link rel="stylesheet" href="../assets/css/admin.css?v=12">
     <link rel="icon" type="image/png" href="../assets/images/icon.png">
+    <style>
+        .reset-submit-spinner {
+            display: inline-block;
+            width: 1em;
+            height: 1em;
+            margin-right: 0.55em;
+            border: 2px solid currentColor;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: reset-submit-spin 0.7s linear infinite;
+        }
+        .reset-submit-spinner[hidden] { display: none; }
+        @keyframes reset-submit-spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
 </head>
 <body class="login-page">
     <button class="theme-toggle login-theme-toggle" type="button" data-theme-toggle aria-label="Toggle color theme" aria-pressed="false">
@@ -142,14 +158,36 @@ try {
             <div class="notice info" role="status"><?= adminEscape($resetRequestMessage) ?></div>
         <?php endif; ?>
 
-        <form method="post" class="admin-form">
+        <form method="post" class="admin-form" id="resetRequestForm">
             <input type="hidden" name="csrf_token" value="<?= adminEscape(adminCsrfToken()) ?>">
             <label for="email">Account email</label>
             <input id="email" name="email" type="email" placeholder="you@example.com" maxlength="190" autocomplete="email" required value="<?= adminEscape($email) ?>">
-            <button class="button primary full-width" type="submit">Email reset link</button>
+            <button class="button primary full-width" id="resetRequestSubmit" type="submit">
+                <span class="reset-submit-spinner" id="resetRequestSpinner" aria-hidden="true" hidden></span>
+                <span id="resetRequestSubmitLabel" aria-live="polite">Email reset link</span>
+            </button>
         </form>
         <a class="login-public-link" href="index">Return to sign in</a>
     </main>
     <script src="../assets/js/password_visibility.js?v=1" defer></script>
+    <script>
+        (function () {
+            var form = document.getElementById('resetRequestForm');
+            var button = document.getElementById('resetRequestSubmit');
+            var spinner = document.getElementById('resetRequestSpinner');
+            var label = document.getElementById('resetRequestSubmitLabel');
+
+            if (!form || !button || !spinner || !label) {
+                return;
+            }
+
+            form.addEventListener('submit', function () {
+                button.disabled = true;
+                button.setAttribute('aria-busy', 'true');
+                spinner.hidden = false;
+                label.textContent = 'Sending...';
+            });
+        })();
+    </script>
 </body>
 </html>
