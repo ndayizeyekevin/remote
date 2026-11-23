@@ -5,6 +5,6 @@
 /.env.*
 /config/database.php
 /config.php
-
+.env
 .htaccess
 internal.php
