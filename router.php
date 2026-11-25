@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/includes/error_logger.php';
+
 header_remove('X-Powered-By');
 
 if (!function_exists('str_starts_with')) {
@@ -25,6 +27,7 @@ $privatePaths = [
     '/.git',
     '/config/',
     '/includes/',
+    '/logs/',
     '/vendor/',
     '/admin/includes/',
 ];

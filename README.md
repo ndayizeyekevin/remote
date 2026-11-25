@@ -42,6 +42,10 @@ Edit `config/database.php` for each environment. Keep production credentials pri
 The admin account and login-history tables are created by the admin sign-in/setup page when it is first opened. Menu content tables must already exist and be populated separately.
 Database configuration accepts both `DB_NAME` (used by Wasmer) and `DB_DATABASE` (used by local/shared-hosting `.env` files).
 
+### Error logging
+
+PHP errors are written to `logs/error_log` by default, and are not displayed in browser responses. Set `ERROR_LOG_PATH` in `.env` or the hosting environment to use a different absolute path; ensure the PHP process can create and write to the log directory. The default `logs/` directory is excluded from Git and blocked from web access.
+
 ### Email delivery
 
 For local or shared hosting with external SMTP, set the SMTP host, port, encryption mode, username, password, and sender details in the private `.env` file. On Wasmer, configure those as app environment variables and store the password as a secret. The app uses `config/smtp.php` when present and falls back to the tracked, environment-based `config/smtp.example.php`, so production does not need a copied secret config file. The public room-enquiry form and admin password-reset email both require a working email configuration. Room enquiries are sent to `reservations@kabchotel.rw`.
