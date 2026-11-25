@@ -7,9 +7,13 @@ header('Cache-Control: no-store, private');
 $search = isset($_GET['q']) && is_string($_GET['q']) ? trim($_GET['q']) : '';
 $allowedPageSizes = [10, 25, 50, 100];
 $requestedPageSize = isset($_GET['per_page']) && is_string($_GET['per_page'])
-    ? filter_var($_GET['per_page'], FILTER_VALIDATE_INT)
-    : 25;
-$limit = is_int($requestedPageSize) && in_array($requestedPageSize, $allowedPageSizes, true)
+    ? $_GET['per_page']
+    : '25';
+$showAll = $requestedPageSize === 'all';
+$requestedPageSize = !$showAll
+    ? filter_var($requestedPageSize, FILTER_VALIDATE_INT)
+    : false;
+$pageSize = is_int($requestedPageSize) && in_array($requestedPageSize, $allowedPageSizes, true)
     ? $requestedPageSize
     : 25;
 $page = isset($_GET['page']) && is_string($_GET['page'])
@@ -31,9 +35,10 @@ try {
         $countStmt->execute([':count_name' => $searchTerm, ':count_desc' => $searchTerm]);
     }
     $total = (int) $countStmt->fetchColumn();
-    $pages = max(1, (int) ceil($total / $limit));
+    $limit = $showAll ? max(1, $total) : $pageSize;
+    $pages = $showAll ? 1 : max(1, (int) ceil($total / $pageSize));
     $page = min($page, $pages);
-    $offset = ($page - 1) * $limit;
+    $offset = $showAll ? 0 : ($page - 1) * $pageSize;
 
     $query = 'SELECT menu_id, menu_name, menu_desc, menu_price, image_path FROM menu';
     if ($search !== '') {

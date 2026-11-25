@@ -79,6 +79,10 @@
         return url.pathname + url.search + url.hash;
     }
 
+    function selectedPageSize() {
+        return pageSizeSelect.value === 'all' ? 'all' : Number(pageSizeSelect.value);
+    }
+
     function updatePageLink(link, query, page, pageSize, disabled) {
         link.href = pageUrl(query, page, pageSize);
         link.dataset.page = String(page);
@@ -154,7 +158,7 @@
     async function searchMenu(requestedPage) {
         var query = input.value.trim();
         var page = requestedPage || 1;
-        var pageSize = Number(pageSizeSelect.value);
+        var pageSize = selectedPageSize();
         clearLink.hidden = query === '';
         if (controller) {
             controller.abort();
@@ -201,14 +205,14 @@
                 throw new Error('The search response was invalid.');
             }
 
-            window.history.replaceState({}, '', pageUrl(query, data.page, data.page_size));
+            window.history.replaceState({}, '', pageUrl(query, data.page, pageSize));
             renderItems(data.items);
             var firstItem = data.total === 0 ? 0 : ((data.page - 1) * data.page_size) + 1;
             var lastItem = Math.min(data.page * data.page_size, data.total);
             status.textContent = data.total === 0
                 ? '0 items found.'
                 : 'Showing ' + firstItem + '-' + lastItem + ' of ' + data.total + ' items.';
-            renderPagination(data.page, data.pages, query, data.page_size);
+            renderPagination(data.page, data.pages, query, pageSize);
         } catch (error) {
             if (error.name === 'AbortError') {
                 return;

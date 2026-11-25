@@ -4,11 +4,16 @@ require_once __DIR__ . '/includes/require_admin.php';
 $search = isset($_GET['q']) && is_string($_GET['q']) ? trim($_GET['q']) : '';
 $allowedPageSizes = [10, 25, 50, 100];
 $requestedPageSize = isset($_GET['per_page']) && is_string($_GET['per_page'])
-    ? filter_var($_GET['per_page'], FILTER_VALIDATE_INT)
-    : 25;
+    ? $_GET['per_page']
+    : '25';
+$showAll = $requestedPageSize === 'all';
+$requestedPageSize = !$showAll
+    ? filter_var($requestedPageSize, FILTER_VALIDATE_INT)
+    : false;
 $pageSize = is_int($requestedPageSize) && in_array($requestedPageSize, $allowedPageSizes, true)
     ? $requestedPageSize
     : 25;
+$pageSizeParam = $showAll ? 'all' : $pageSize;
 $page = isset($_GET['page']) && is_string($_GET['page'])
     ? filter_var($_GET['page'], FILTER_VALIDATE_INT)
     : 1;
@@ -32,9 +37,10 @@ try {
         $countStmt->execute([':search_name' => $searchTerm, ':search_desc' => $searchTerm]);
     }
     $totalItems = (int) $countStmt->fetchColumn();
-    $totalPages = max(1, (int) ceil($totalItems / $pageSize));
+    $queryPageSize = $showAll ? max(1, $totalItems) : $pageSize;
+    $totalPages = $showAll ? 1 : max(1, (int) ceil($totalItems / $pageSize));
     $page = min($page, $totalPages);
-    $offset = ($page - 1) * $pageSize;
+    $offset = $showAll ? 0 : ($page - 1) * $pageSize;
 
     $query = 'SELECT menu_id, menu_name, menu_desc, menu_price, image_path FROM menu';
     if ($search !== '') {
@@ -46,7 +52,7 @@ try {
         $stmt->bindValue(':search_name', $searchTerm, PDO::PARAM_STR);
         $stmt->bindValue(':search_desc', $searchTerm, PDO::PARAM_STR);
     }
-    $stmt->bindValue(':page_size', $pageSize, PDO::PARAM_INT);
+    $stmt->bindValue(':page_size', $queryPageSize, PDO::PARAM_INT);
     $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
     $stmt->execute();
     $menuItems = $stmt->fetchAll();
@@ -65,12 +71,12 @@ $lastItem = $offset + count($menuItems);
 $previousPageUrl = '?' . http_build_query([
     'q' => $search,
     'page' => max(1, $page - 1),
-    'per_page' => $pageSize,
+    'per_page' => $pageSizeParam,
 ]);
 $nextPageUrl = '?' . http_build_query([
     'q' => $search,
     'page' => min($totalPages, $page + 1),
-    'per_page' => $pageSize,
+    'per_page' => $pageSizeParam,
 ]);
 
 if ($totalPages <= 7) {
@@ -133,8 +139,9 @@ if ($totalPages <= 7) {
                 <span>Rows per page</span>
                 <select id="menuPageSize" name="per_page">
                     <?php foreach ($allowedPageSizes as $allowedPageSize): ?>
-                        <option value="<?= $allowedPageSize ?>"<?= $pageSize === $allowedPageSize ? ' selected' : '' ?>><?= $allowedPageSize ?></option>
+                        <option value="<?= $allowedPageSize ?>"<?= !$showAll && $pageSize === $allowedPageSize ? ' selected' : '' ?>><?= $allowedPageSize ?></option>
                     <?php endforeach; ?>
+                    <option value="all"<?= $showAll ? ' selected' : '' ?>>All</option>
                 </select>
             </label>
         </form>
@@ -173,7 +180,7 @@ if ($totalPages <= 7) {
                         <?php if ($visiblePage === '...'): ?>
                             <span class="pagination-ellipsis" aria-hidden="true">...</span>
                         <?php else: ?>
-                            <?php $pageUrl = '?' . http_build_query(['q' => $search, 'page' => $visiblePage, 'per_page' => $pageSize]); ?>
+                            <?php $pageUrl = '?' . http_build_query(['q' => $search, 'page' => $visiblePage, 'per_page' => $pageSizeParam]); ?>
                             <a class="pagination-page<?= $visiblePage === $page ? ' is-current' : '' ?>"
                                 href="<?= adminEscape($pageUrl) ?>" data-page="<?= $visiblePage ?>"
                                 aria-label="Page <?= $visiblePage ?>"<?= $visiblePage === $page ? ' aria-current="page"' : '' ?>><?= $visiblePage ?></a>
