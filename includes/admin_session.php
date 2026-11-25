@@ -1,5 +1,6 @@
 <?php
 
+require_once __DIR__ . '/error_logger.php';
 require_once __DIR__ . '/database_transaction.php';
 
 header_remove('X-Powered-By');
