@@ -42,16 +42,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $errorMessage = 'Enter a whole-number price between 0 and 2,147,483,647.';
         } else {
             try {
-                $update = $db->prepare(
-                    'UPDATE menu SET menu_name = :menu_name, menu_desc = :menu_desc, menu_price = :menu_price
-                     WHERE menu_id = :menu_id'
-                );
-                $update->execute([
-                    ':menu_name' => $name,
-                    ':menu_desc' => $description,
-                    ':menu_price' => (int) $price,
-                    ':menu_id' => $menuId,
-                ]);
+                withDatabaseTransaction($db, function () use ($db, $name, $description, $price, $menuId): void {
+                    $update = $db->prepare(
+                        'UPDATE menu SET menu_name = :menu_name, menu_desc = :menu_desc, menu_price = :menu_price
+                         WHERE menu_id = :menu_id'
+                    );
+                    $update->execute([
+                        ':menu_name' => $name,
+                        ':menu_desc' => $description,
+                        ':menu_price' => (int) $price,
+                        ':menu_id' => $menuId,
+                    ]);
+                });
                 adminSetFlash('Menu item updated successfully.');
                 header('Location: menu');
                 exit;

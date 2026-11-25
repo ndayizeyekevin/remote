@@ -7,6 +7,8 @@ date_default_timezone_set('Africa/Kigali');
 // ini_set('display_startup_errors', 1);
 // error_reporting(E_ALL);
 
+require_once __DIR__ . '/database_transaction.php';
+
 try {
     $databaseConfig = require __DIR__ . '/../config/database.php';
 

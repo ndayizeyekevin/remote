@@ -58,16 +58,18 @@ try {
                 if ($user) {
                     $token = bin2hex(random_bytes(32));
                     $tokenHash = hash('sha256', $token);
-                    $saveToken = $db->prepare(
-                        'UPDATE admin_users
-                         SET password_reset_key = :token_hash,
-                             reset_key_expiry = DATE_ADD(NOW(), INTERVAL 1 HOUR)
-                         WHERE id = :id'
-                    );
-                    $saveToken->execute([
-                        ':token_hash' => $tokenHash,
-                        ':id' => $user['id'],
-                    ]);
+                    withDatabaseTransaction($db, function () use ($db, $tokenHash, $user): void {
+                        $saveToken = $db->prepare(
+                            'UPDATE admin_users
+                             SET password_reset_key = :token_hash,
+                                 reset_key_expiry = DATE_ADD(NOW(), INTERVAL 1 HOUR)
+                             WHERE id = :id'
+                        );
+                        $saveToken->execute([
+                            ':token_hash' => $tokenHash,
+                            ':id' => $user['id'],
+                        ]);
+                    });
 
                     $serverName = (string) ($_SERVER['SERVER_NAME'] ?? '');
                     if ($serverName !== '' && preg_match('/^[a-zA-Z0-9.-]+$/', $serverName)) {
@@ -85,19 +87,23 @@ try {
                             sendAdminPasswordResetEmail($email, $resetUrl);
                             error_log('Admin password reset email accepted by the configured mail transport.');
                         } catch (Throwable $e) {
-                            $db->prepare(
-                                'UPDATE admin_users SET password_reset_key = NULL, reset_key_expiry = NULL
-                                 WHERE id = :id AND password_reset_key = :token_hash'
-                            )->execute([
-                                ':id' => $user['id'],
-                                ':token_hash' => $tokenHash,
-                            ]);
+                            withDatabaseTransaction($db, function () use ($db, $user, $tokenHash): void {
+                                $db->prepare(
+                                    'UPDATE admin_users SET password_reset_key = NULL, reset_key_expiry = NULL
+                                     WHERE id = :id AND password_reset_key = :token_hash'
+                                )->execute([
+                                    ':id' => $user['id'],
+                                    ':token_hash' => $tokenHash,
+                                ]);
+                            });
                             error_log('Admin password reset email could not be sent: ' . $e->getMessage());
                         }
                     } else {
-                        $db->prepare(
-                            'UPDATE admin_users SET password_reset_key = NULL, reset_key_expiry = NULL WHERE id = :id'
-                        )->execute([':id' => $user['id']]);
+                        withDatabaseTransaction($db, function () use ($db, $user): void {
+                            $db->prepare(
+                                'UPDATE admin_users SET password_reset_key = NULL, reset_key_expiry = NULL WHERE id = :id'
+                            )->execute([':id' => $user['id']]);
+                        });
                         error_log('Admin password reset email could not be sent: invalid server name configuration.');
                     }
                 }
