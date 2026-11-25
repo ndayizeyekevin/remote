@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/database_transaction.php';
+
 header_remove('X-Powered-By');
 
 if (session_status() !== PHP_SESSION_ACTIVE) {
@@ -67,31 +69,37 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 
                 public function write(string $id, string $data): bool
                 {
-                    $statement = $this->db->prepare(
-                        'INSERT INTO app_sessions (id, data, last_activity)
-                         VALUES (:id, :data, NOW())
-                         ON DUPLICATE KEY UPDATE data = VALUES(data), last_activity = NOW()'
-                    );
-                    return $statement->execute([
-                        ':id' => $id,
-                        ':data' => $data,
-                    ]);
+                    return withDatabaseTransaction($this->db, function () use ($id, $data): bool {
+                        $statement = $this->db->prepare(
+                            'INSERT INTO app_sessions (id, data, last_activity)
+                             VALUES (:id, :data, NOW())
+                             ON DUPLICATE KEY UPDATE data = VALUES(data), last_activity = NOW()'
+                        );
+                        return $statement->execute([
+                            ':id' => $id,
+                            ':data' => $data,
+                        ]);
+                    });
                 }
 
                 public function destroy(string $id): bool
                 {
-                    $statement = $this->db->prepare('DELETE FROM app_sessions WHERE id = :id');
-                    return $statement->execute([':id' => $id]);
+                    return withDatabaseTransaction($this->db, function () use ($id): bool {
+                        $statement = $this->db->prepare('DELETE FROM app_sessions WHERE id = :id');
+                        return $statement->execute([':id' => $id]);
+                    });
                 }
 
                 public function gc(int $maxLifetime)
                 {
-                    $statement = $this->db->prepare(
-                        'DELETE FROM app_sessions WHERE last_activity < DATE_SUB(NOW(), INTERVAL :seconds SECOND)'
-                    );
-                    $statement->bindValue(':seconds', $maxLifetime, PDO::PARAM_INT);
-                    $statement->execute();
-                    return $statement->rowCount();
+                    return withDatabaseTransaction($this->db, function () use ($maxLifetime): int {
+                        $statement = $this->db->prepare(
+                            'DELETE FROM app_sessions WHERE last_activity < DATE_SUB(NOW(), INTERVAL :seconds SECOND)'
+                        );
+                        $statement->bindValue(':seconds', $maxLifetime, PDO::PARAM_INT);
+                        $statement->execute();
+                        return $statement->rowCount();
+                    });
                 }
             };
         }

@@ -90,13 +90,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $messageClass = 'error';
             } else {
                 try {
-                    $updateStmt = $db->prepare('UPDATE menu SET image_path = :image_path WHERE menu_id = :menu_id');
-                    $updateStmt->execute([
-                        ':image_path' => $relativePath,
-                        ':menu_id' => $menuId,
-                    ]);
+                    $updatedRows = withDatabaseTransaction($db, function () use ($db, $relativePath, $menuId): int {
+                        $updateStmt = $db->prepare('UPDATE menu SET image_path = :image_path WHERE menu_id = :menu_id');
+                        $updateStmt->execute([
+                            ':image_path' => $relativePath,
+                            ':menu_id' => $menuId,
+                        ]);
+                        return $updateStmt->rowCount();
+                    });
 
-                    if ($updateStmt->rowCount() > 0) {
+                    if ($updatedRows > 0) {
                         $message = 'Image uploaded successfully and menu item updated.';
                         $messageClass = 'success';
                     } else {
